@@ -1,0 +1,6 @@
+/proc/net/dev and iptables monitor!
+
+sudo is required to execute command: iptables -L -n -x -v --line-numbers
+
+usage:
+lua monitor.lua

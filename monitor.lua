@@ -1,0 +1,260 @@
+PACKET_COUNT_TRIGHER = 5000
+MBPS_COUNT_TRIGHER = 50
+LOG_EACH_TIME = 60
+
+function string:explode(div)
+  if (div=='') then return false end
+  local pos,arr = 0,{}
+  -- for each divider found
+  for st,sp in function() return string.find(self,div,pos,true) end do
+    table.insert(arr,string.sub(self,pos,st-1)) -- Attach chars left of current divider
+    pos = sp + 1 -- Jump past current divider
+  end
+  table.insert(arr,string.sub(self,pos)) -- Attach chars right of last divider
+  return arr
+end
+
+function string:trim()
+  return (self:gsub("^%s*(.-)%s*$", "%1"))
+end
+
+function systemCall(action)
+    local f = assert(io.popen(action, 'r'))
+    local data = assert(f:read('*a'))
+    f:close()
+    return data
+end
+
+Monitor = { }
+
+function Monitor.init()
+	os.execute("mkdir -p reports/")
+end
+
+Monitor.TIME_NEXT_LOG = 0
+
+function Monitor.getCurrentTotalNetworkTable()
+  local networkMap = { }
+
+  local file = io.open('/proc/net/dev', 'r')
+
+  if file == nil then
+    return networkMap
+  end
+	
+  local lines = file:read('*all'):explode('\n')
+
+  if #lines > 2 then
+    for lineCounter = 3, #lines do
+      if lines[lineCounter] ~= "" then
+        local nameXRest = lines[lineCounter]:explode(":")
+        
+        local gsubedString = nameXRest[2]:trim():gsub('%s+',' ')
+        local words = gsubedString:explode(" ")
+              
+        local currentIface = { }
+        currentIface.name = nameXRest[1]:trim()
+        
+        currentIface.rx_bytes = tonumber(words[1])
+        currentIface.rx_packets = tonumber(words[2])
+        currentIface.rx_errs = tonumber(words[3])
+        currentIface.rx_drops = tonumber(words[4])
+   
+        currentIface.tx_bytes = tonumber(words[9])
+        currentIface.tx_packets = tonumber(words[10])
+        currentIface.tx_errs = tonumber(words[11])
+        currentIface.tx_drops = tonumber(words[12])
+        
+        table.insert(networkMap, currentIface)
+      end
+    end
+  end
+
+  return networkMap
+end
+
+function Monitor.getCurrentNetworkTable()
+  local lines = systemCall('sudo iptables -L -n -x -v --line-numbers'):explode('\n')
+
+  local networkMap = { }
+  local lastChain = nil
+
+  for lineCounter = 1, #lines do
+    local gsubedString = lines[lineCounter]:gsub('%s+',' ')
+    local words = gsubedString:explode(" ")
+    
+    if words[1] == "Chain" then
+      lastChain = { }
+      lastChain.name = words[2]
+      
+      local toPrint = words[2]
+      
+      if words[3] == "(policy" then
+        toPrint = toPrint .. " default: " .. words[4]
+      end
+    else
+      if words[1] ~= "num" then
+        local ruleNum = tonumber(words[1])      
+        
+        if ruleNum == nil then
+          if lastChain ~= nil then
+            table.insert(networkMap, lastChain)
+          end
+          
+          lastChain = nil
+        else
+          if lastChain ~= nil then
+            local rule = { }
+            
+            rule.pkts = tonumber(words[2])
+            rule.bytes = tonumber(words[3])
+            rule.rule = words[4]
+            rule.prot = words[5]
+            rule.interface = words[7]
+            rule.source = words[9]
+            rule.destination = words[10]
+            rule.desc = ""
+            
+            if #words > 10 then
+              for counter = 11, #words do
+                rule.desc = rule.desc .. words[counter] .. " "
+              end
+            end
+            
+            table.insert(lastChain, rule)
+          end
+        end
+      end
+    end
+  end
+  
+  return networkMap
+end
+
+function isSameSchema(network1, network2)
+  if #network1 ~= #network2 then
+    return false
+  end
+
+  for count = 1, #network1 do
+    if #network1[count] ~= #network2[count] then
+      return false
+    end
+  end
+  
+  return true
+end
+
+function logToFile(output)
+  local currentTime = os.time()
+
+  output = "\n\n---------------------- " .. os.date("%X") .. "-----------------\n" .. output
+  
+  local year = os.date("%Y", currentTime)
+  local month = os.date("%m", currentTime)
+  local day = os.date("%d", currentTime)
+
+  local file = io.open("reports/".. year .. "-" .. month .. "-" .. day .. ".log", "a")  
+  
+  if file ~= nil then
+    file:write(output)
+    file:close()
+  end
+  
+  output = output .. "\n\n" 
+end
+
+function Monitor.run()
+	local beforeNetwork = nil
+	local beforeTotalNetwork = nil
+	
+	while true do
+	  if beforeNetwork == nil then
+		beforeNetwork = Monitor.getCurrentNetworkTable()
+		beforeTotalNetwork = Monitor.getCurrentTotalNetworkTable()
+	  else
+		local currentNetwork = Monitor.getCurrentNetworkTable()
+		local currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
+		
+		if not isSameSchema(currentNetwork, beforeNetwork) then
+		  beforeNetwork = currentNetwork
+		  
+		elseif not isSameSchema(beforeTotalNetwork, currentTotalNetwork) then
+		  beforeTotalNetwork = currentTotalNetwork
+		else
+		  local logPrint = false
+	  
+		  local textToPrint = ''
+		  
+		  for ifaceCount = 1, #currentTotalNetwork do
+			local rxBytes = currentTotalNetwork[ifaceCount].rx_bytes - beforeTotalNetwork[ifaceCount].rx_bytes
+			local rxPackets = currentTotalNetwork[ifaceCount].rx_packets - beforeTotalNetwork[ifaceCount].rx_packets
+			local rxErrs = currentTotalNetwork[ifaceCount].rx_errs - beforeTotalNetwork[ifaceCount].rx_errs
+			local rxDrops = currentTotalNetwork[ifaceCount].rx_drops - beforeTotalNetwork[ifaceCount].rx_drops
+			
+			local txBytes = currentTotalNetwork[ifaceCount].tx_bytes - beforeTotalNetwork[ifaceCount].tx_bytes
+			local txPackets = currentTotalNetwork[ifaceCount].tx_packets - beforeTotalNetwork[ifaceCount].tx_packets
+			local txErrs = currentTotalNetwork[ifaceCount].tx_errs - beforeTotalNetwork[ifaceCount].tx_errs
+			local txDrops = currentTotalNetwork[ifaceCount].tx_drops - beforeTotalNetwork[ifaceCount].tx_drops
+
+			local rxMbps = ((rxBytes * 8)/1000000)
+			local txMbps = ((txBytes * 8)/1000000)
+			
+			textToPrint = textToPrint .. currentTotalNetwork[ifaceCount].name .. "| rxMb/s(" .. string.format("%.2f",rxMbps) .. ") rxPkt/s(" .. rxPackets .. ") rxEr/s(" .. rxErrs .. ") rxD/s(" .. rxDrops .. ") || " ..
+					  "txMb/s(" .. string.format("%.2f",txMbps) .. ") txPkt/s(" .. txPackets .. ") txEr/s(" .. txErrs .. ") txD/s(" .. txDrops .. ")\n"
+					  
+		    if txDrops > 50 or txErrs > 50 or rxDrops > 50 or rxErrs > 50 then
+		      logPrint = true
+		    end
+		  end
+
+		  textToPrint = textToPrint .. "\n"
+		  
+		  for chainCount = 1, #currentNetwork do
+			textToPrint = textToPrint .. currentNetwork[chainCount].name .. "\n"
+	 
+			for ruleCount = 1, #currentNetwork[chainCount] do
+			  local pkts = currentNetwork[chainCount][ruleCount].pkts - beforeNetwork[chainCount][ruleCount].pkts
+			  local bytes = currentNetwork[chainCount][ruleCount].bytes - beforeNetwork[chainCount][ruleCount].bytes
+			  local mbps = ((bytes * 8)/1000000)
+			  
+				textToPrint = textToPrint ..
+				"    " .. pkts .. " pks/s | " .. 
+				string.format("%.2f",mbps) .. " Mbps | " .. 
+				currentNetwork[chainCount][ruleCount].rule .. " | " ..  
+				"prot: " .. currentNetwork[chainCount][ruleCount].prot .. " | " .. 
+				"iface: " .. currentNetwork[chainCount][ruleCount].interface .. " | " .. 
+				currentNetwork[chainCount][ruleCount].source .. " -> " .. 
+				currentNetwork[chainCount][ruleCount].destination .. " | " .. 
+				currentNetwork[chainCount][ruleCount].desc .. "\n"
+				
+				if pkts > PACKET_COUNT_TRIGHER or mbps > MBPS_COUNT_TRIGHER then
+				  logPrint = true
+				end
+			end
+		  end  
+			
+		  if logPrint then
+			if Monitor.TIME_NEXT_LOG - os.time() < 0 then
+			  Monitor.TIME_NEXT_LOG = os.time() + LOG_EACH_TIME
+
+			  logToFile(textToPrint)
+			  currentNetwork = Monitor.getCurrentNetworkTable()
+			  currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
+			end
+		  end
+		
+		  print(textToPrint)
+		end
+		
+		beforeTotalNetwork = currentTotalNetwork
+		beforeNetwork = currentNetwork
+	  end
+
+	  os.execute("sleep 1")
+	  os.execute("clear")
+	end
+end
+
+Monitor.init()
+Monitor.run()
