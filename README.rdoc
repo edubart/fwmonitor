@@ -13,8 +13,11 @@ $ sudo make install
 # /usr/sbin/fwmonitor
 
 NOTE: you must run as root
+
 NOTE: logs are saved to /var/log/fwmonitor/
+
 NOTE: to stop you need to run "killall -9 fwmonitor"
+
 TIP: you may want to run inside a screen session
 
 == Credits
