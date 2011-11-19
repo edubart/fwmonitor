@@ -1,6 +1,9 @@
+#!/usr/bin/lua
+
 PACKET_COUNT_TRIGHER = 5000
 MBPS_COUNT_TRIGHER = 50
 LOG_EACH_TIME = 60
+LOG_PATH = "/var/log/fwmonitor/"
 
 function string:explode(div)
     if (div=='') then return false end
@@ -30,7 +33,7 @@ end
 Monitor = { }
 
 function Monitor.init()
-    os.execute("mkdir -p reports/")
+    os.execute("mkdir -p " .. LOG_PATH)
 end
 
 Monitor.TIME_NEXT_LOG = 0
@@ -76,7 +79,7 @@ function Monitor.getCurrentTotalNetworkTable()
 end
 
 function Monitor.getCurrentNetworkTable()
-    local lines = systemCall('sudo iptables -L -n -x -v --line-numbers'):explode('\n')
+    local lines = systemCall('iptables -L -n -x -v --line-numbers'):explode('\n')
 
     local networkMap = { }
     local lastChain = nil
@@ -156,7 +159,7 @@ function logToFile(output)
     local month = os.date("%m", currentTime)
     local day = os.date("%d", currentTime)
 
-    local file = io.open("reports/".. year .. "-" .. month .. "-" .. day .. ".log", "a")
+    local file = io.open(LOG_PATH .. year .. "-" .. month .. "-" .. day .. ".log", "a")
 
     if file ~= nil then
         file:write(output)
