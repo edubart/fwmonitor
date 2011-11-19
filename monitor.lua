@@ -247,7 +247,7 @@ function Monitor.run()
                     end
                 end
 
-                print(textToPrint)
+                print(string.char(27) .. "[2J" .. textToPrint)
             end
 
             beforeTotalNetwork = currentTotalNetwork
@@ -255,7 +255,6 @@ function Monitor.run()
         end
 
         os.execute("sleep 1")
-        os.execute("clear")
     end
 end
 
