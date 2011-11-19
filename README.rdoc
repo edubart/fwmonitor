@@ -1,12 +1,15 @@
 == What is fwmonitor ?
+
 fwmonitor is a script written in lua to monitor you firewall throughput in realtime,
 it calculates statics by looking /proc/net/dev and by the command "iptables -L -n -x -v".
 It was created for monitoring DDOS floods.
 
 == Install
+
 $ sudo make install
 
 == Usage
+
 # /usr/sbin/fwmonitor
 
 NOTE: you must run as root
