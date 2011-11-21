@@ -12,6 +12,7 @@ AUTHORS
 INSTALL
   $ sudo apt-get install luarocks
   $ sudo luarocks install lua_signal
+  $ sudo luarocks install luasocket
   $ sudo make install
 
 USAGE
