@@ -1,5 +1,23 @@
 #!/usr/bin/lua
 
+require 'signal'
+require 'socket'
+
+function terminate()
+    running = false
+end
+
+function getticks()
+    return socket.gettime()
+end
+
+function sleep(sec)
+    socket.select(nil, nil, sec)
+end
+
+signal.signal("SIGTERM", terminate)
+signal.signal("SIGINT", terminate)
+
 PACKET_COUNT_TRIGHER = 5000
 MBPS_COUNT_TRIGHER = 50
 LOG_EACH_TIME = 60
@@ -172,92 +190,97 @@ end
 function Monitor.run()
     local beforeNetwork = nil
     local beforeTotalNetwork = nil
+    local lastUpdate = 0
 
-    while true do
-        if beforeNetwork == nil then
-            beforeNetwork = Monitor.getCurrentNetworkTable()
-            beforeTotalNetwork = Monitor.getCurrentTotalNetworkTable()
-        else
-            local currentNetwork = Monitor.getCurrentNetworkTable()
-            local currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
-
-            if not isSameSchema(currentNetwork, beforeNetwork) then
-                beforeNetwork = currentNetwork
-
-            elseif not isSameSchema(beforeTotalNetwork, currentTotalNetwork) then
-                beforeTotalNetwork = currentTotalNetwork
-
+    running = true
+    while running do
+        local now = getticks()
+        if now >= lastUpdate + 1 then
+            lastUpdate = now
+            if beforeNetwork == nil then
+                beforeNetwork = Monitor.getCurrentNetworkTable()
+                beforeTotalNetwork = Monitor.getCurrentTotalNetworkTable()
             else
-                local logPrint = false
+                local currentNetwork = Monitor.getCurrentNetworkTable()
+                local currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
 
-                local textToPrint = ''
+                if not isSameSchema(currentNetwork, beforeNetwork) then
+                    beforeNetwork = currentNetwork
 
-                for ifaceCount = 1, #currentTotalNetwork do
-                    local rxBytes = currentTotalNetwork[ifaceCount].rx_bytes - beforeTotalNetwork[ifaceCount].rx_bytes
-                    local rxPackets = currentTotalNetwork[ifaceCount].rx_packets - beforeTotalNetwork[ifaceCount].rx_packets
-                    local rxErrs = currentTotalNetwork[ifaceCount].rx_errs - beforeTotalNetwork[ifaceCount].rx_errs
-                    local rxDrops = currentTotalNetwork[ifaceCount].rx_drops - beforeTotalNetwork[ifaceCount].rx_drops
+                elseif not isSameSchema(beforeTotalNetwork, currentTotalNetwork) then
+                    beforeTotalNetwork = currentTotalNetwork
 
-                    local txBytes = currentTotalNetwork[ifaceCount].tx_bytes - beforeTotalNetwork[ifaceCount].tx_bytes
-                    local txPackets = currentTotalNetwork[ifaceCount].tx_packets - beforeTotalNetwork[ifaceCount].tx_packets
-                    local txErrs = currentTotalNetwork[ifaceCount].tx_errs - beforeTotalNetwork[ifaceCount].tx_errs
-                    local txDrops = currentTotalNetwork[ifaceCount].tx_drops - beforeTotalNetwork[ifaceCount].tx_drops
+                else
+                    local logPrint = false
 
-                    local rxMbps = ((rxBytes * 8)/1000000)
-                    local txMbps = ((txBytes * 8)/1000000)
+                    local textToPrint = ''
 
-                    textToPrint = textToPrint .. currentTotalNetwork[ifaceCount].name .. "| rxMb/s(" .. string.format("%.2f",rxMbps) .. ") rxPkt/s(" .. rxPackets .. ") rxEr/s(" .. rxErrs .. ") rxD/s(" .. rxDrops .. ") || " ..
-                           "txMb/s(" .. string.format("%.2f",txMbps) .. ") txPkt/s(" .. txPackets .. ") txEr/s(" .. txErrs .. ") txD/s(" .. txDrops .. ")\n"
+                    for ifaceCount = 1, #currentTotalNetwork do
+                        local rxBytes = currentTotalNetwork[ifaceCount].rx_bytes - beforeTotalNetwork[ifaceCount].rx_bytes
+                        local rxPackets = currentTotalNetwork[ifaceCount].rx_packets - beforeTotalNetwork[ifaceCount].rx_packets
+                        local rxErrs = currentTotalNetwork[ifaceCount].rx_errs - beforeTotalNetwork[ifaceCount].rx_errs
+                        local rxDrops = currentTotalNetwork[ifaceCount].rx_drops - beforeTotalNetwork[ifaceCount].rx_drops
 
-                    if txDrops > 50 or txErrs > 50 or rxDrops > 50 or rxErrs > 50 then
-                        logPrint = true
-                    end
-                end
+                        local txBytes = currentTotalNetwork[ifaceCount].tx_bytes - beforeTotalNetwork[ifaceCount].tx_bytes
+                        local txPackets = currentTotalNetwork[ifaceCount].tx_packets - beforeTotalNetwork[ifaceCount].tx_packets
+                        local txErrs = currentTotalNetwork[ifaceCount].tx_errs - beforeTotalNetwork[ifaceCount].tx_errs
+                        local txDrops = currentTotalNetwork[ifaceCount].tx_drops - beforeTotalNetwork[ifaceCount].tx_drops
 
-                textToPrint = textToPrint .. "\n"
+                        local rxMbps = ((rxBytes * 8)/1000000)
+                        local txMbps = ((txBytes * 8)/1000000)
 
-                for chainCount = 1, #currentNetwork do
-                    textToPrint = textToPrint .. currentNetwork[chainCount].name .. "\n"
+                        textToPrint = textToPrint .. currentTotalNetwork[ifaceCount].name .. "| rxMb/s(" .. string.format("%.2f",rxMbps) .. ") rxPkt/s(" .. rxPackets .. ") rxEr/s(" .. rxErrs .. ") rxD/s(" .. rxDrops .. ") || " ..
+                            "txMb/s(" .. string.format("%.2f",txMbps) .. ") txPkt/s(" .. txPackets .. ") txEr/s(" .. txErrs .. ") txD/s(" .. txDrops .. ")\n"
 
-                    for ruleCount = 1, #currentNetwork[chainCount] do
-                        local pkts = currentNetwork[chainCount][ruleCount].pkts - beforeNetwork[chainCount][ruleCount].pkts
-                        local bytes = currentNetwork[chainCount][ruleCount].bytes - beforeNetwork[chainCount][ruleCount].bytes
-                        local mbps = ((bytes * 8)/1000000)
-
-                        textToPrint = textToPrint ..
-                        "    " .. pkts .. " pks/s | " ..
-                        string.format("%.2f",mbps) .. " Mbps | " ..
-                        currentNetwork[chainCount][ruleCount].rule .. " | " ..
-                        "prot: " .. currentNetwork[chainCount][ruleCount].prot .. " | " ..
-                        "iface: " .. currentNetwork[chainCount][ruleCount].interface .. " | " ..
-                        currentNetwork[chainCount][ruleCount].source .. " -> " ..
-                        currentNetwork[chainCount][ruleCount].destination .. " | " ..
-                        currentNetwork[chainCount][ruleCount].desc .. "\n"
-
-                        if pkts > PACKET_COUNT_TRIGHER or mbps > MBPS_COUNT_TRIGHER then
+                        if txDrops > 50 or txErrs > 50 or rxDrops > 50 or rxErrs > 50 then
                             logPrint = true
                         end
                     end
-                end
 
-                if logPrint then
-                    if Monitor.TIME_NEXT_LOG - os.time() < 0 then
-                        Monitor.TIME_NEXT_LOG = os.time() + LOG_EACH_TIME
+                    textToPrint = textToPrint .. "\n"
 
-                        logToFile(textToPrint)
-                        currentNetwork = Monitor.getCurrentNetworkTable()
-                        currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
+                    for chainCount = 1, #currentNetwork do
+                        textToPrint = textToPrint .. currentNetwork[chainCount].name .. "\n"
+
+                        for ruleCount = 1, #currentNetwork[chainCount] do
+                            local pkts = currentNetwork[chainCount][ruleCount].pkts - beforeNetwork[chainCount][ruleCount].pkts
+                            local bytes = currentNetwork[chainCount][ruleCount].bytes - beforeNetwork[chainCount][ruleCount].bytes
+                            local mbps = ((bytes * 8)/1000000)
+
+                            textToPrint = textToPrint ..
+                            "    " .. pkts .. " pks/s | " ..
+                            string.format("%.2f",mbps) .. " Mbps | " ..
+                            currentNetwork[chainCount][ruleCount].rule .. " | " ..
+                            "prot: " .. currentNetwork[chainCount][ruleCount].prot .. " | " ..
+                            "iface: " .. currentNetwork[chainCount][ruleCount].interface .. " | " ..
+                            currentNetwork[chainCount][ruleCount].source .. " -> " ..
+                            currentNetwork[chainCount][ruleCount].destination .. " | " ..
+                            currentNetwork[chainCount][ruleCount].desc .. "\n"
+
+                            if pkts > PACKET_COUNT_TRIGHER or mbps > MBPS_COUNT_TRIGHER then
+                                logPrint = true
+                            end
+                        end
                     end
+
+                    if logPrint then
+                        if Monitor.TIME_NEXT_LOG - os.time() < 0 then
+                            Monitor.TIME_NEXT_LOG = os.time() + LOG_EACH_TIME
+
+                            logToFile(textToPrint)
+                            currentNetwork = Monitor.getCurrentNetworkTable()
+                            currentTotalNetwork = Monitor.getCurrentTotalNetworkTable()
+                        end
+                    end
+
+                    print(string.char(27) .. "[2J" .. textToPrint)
                 end
 
-                print(string.char(27) .. "[2J" .. textToPrint)
+                beforeTotalNetwork = currentTotalNetwork
+                beforeNetwork = currentNetwork
             end
-
-            beforeTotalNetwork = currentTotalNetwork
-            beforeNetwork = currentNetwork
         end
-
-        os.execute("sleep 1")
+        sleep(0.01)
     end
 end
 
