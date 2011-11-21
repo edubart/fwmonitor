@@ -10,12 +10,13 @@ AUTHORS
   Originally created by darone, slightly changes made by edubart.
 
 INSTALL
+  $ sudo apt-get install luarocks
+  $ sudo luarocks install lua_signal
   $ sudo make install
 
 USAGE
-  $ sudo /usr/sbin/fwmonitor
+  $ sudo fwmonitor
 
   NOTE: you must run as root
   NOTE: logs are saved to /var/log/fwmonitor/
-  NOTE: to stop you need to run "killall -9 fwmonitor"
   TIP: you may want to run inside a screen session
